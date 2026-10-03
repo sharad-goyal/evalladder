@@ -1,0 +1,44 @@
+{
+  "name": "evalladder",
+  "version": "0.1.0",
+  "description": "Test any AI model the same way. Plugin per vendor (Bedrock, OpenAI, Anthropic, Gemini, Ollama), cheap-first LLM judge escalation, per-model cost, and a CI release gate. Built on promptfoo.",
+  "license": "MIT",
+  "author": "Sharad Goyal",
+  "type": "module",
+  "main": "./dist/core/index.js",
+  "types": "./dist/core/index.d.ts",
+  "bin": { "evalladder": "dist/core/cli.js" },
+  "exports": {
+    ".": { "types": "./dist/core/index.d.ts", "import": "./dist/core/index.js" },
+    "./core": { "types": "./dist/core/index.d.ts", "import": "./dist/core/index.js" },
+    "./testkit": { "types": "./dist/testkit/index.d.ts", "import": "./dist/testkit/index.js" },
+    "./promptfoo": { "types": "./dist/promptfoo/index.d.ts", "import": "./dist/promptfoo/index.js" },
+    "./bedrock": { "types": "./dist/providers/bedrock/index.d.ts", "import": "./dist/providers/bedrock/index.js" },
+    "./openai": { "types": "./dist/providers/openai/index.d.ts", "import": "./dist/providers/openai/index.js" },
+    "./anthropic": { "types": "./dist/providers/anthropic/index.d.ts", "import": "./dist/providers/anthropic/index.js" },
+    "./gemini": { "types": "./dist/providers/gemini/index.d.ts", "import": "./dist/providers/gemini/index.js" },
+    "./ollama": { "types": "./dist/providers/ollama/index.d.ts", "import": "./dist/providers/ollama/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "engines": { "node": ">=22.22.0" },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build && npm test",
+    "eval:example": "node dist/core/cli.js run --config examples/support-triage/evalladder.config.mjs --out report.json"
+  },
+  "peerDependencies": { "promptfoo": ">=0.120.0" },
+  "peerDependenciesMeta": { "promptfoo": { "optional": true } },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "promptfoo": "0.123.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  },
+  "repository": { "type": "git", "url": "git+https://github.com/utkarshsystem/evalladder.git" },
+  "homepage": "https://github.com/utkarshsystem/evalladder#readme",
+  "bugs": { "url": "https://github.com/utkarshsystem/evalladder/issues" },
+  "keywords": ["llm", "eval", "evals", "ai", "testing", "promptfoo", "bedrock", "openai", "anthropic", "gemini", "ollama", "llm-as-judge", "release-gate"],
+  "publishConfig": { "access": "public", "provenance": false }
+}
