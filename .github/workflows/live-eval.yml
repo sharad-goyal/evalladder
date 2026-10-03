@@ -1,0 +1,33 @@
+# Manual live run against real models. Needs:
+#   repo variable AWS_EVAL_ROLE_ARN (IAM role trusting GitHub OIDC, allowed bedrock:InvokeModel/Converse on chosen models)
+#   Model access enabled in Bedrock for Nova Lite, Claude Haiku 4.5 and Claude Sonnet 4.5 (us-east-1).
+name: live-eval
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'Comma-separated target ids (blank = all)'
+        required: false
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_EVAL_ROLE_ARN }}
+          aws-region: us-east-1
+      - run: npm ci && npm run build
+      - run: node dist/core/cli.js run --config examples/support-triage/evalladder.config.mjs --out report.json ${{ inputs.only && format('--only {0}', inputs.only) || '' }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report
+          path: report.json
