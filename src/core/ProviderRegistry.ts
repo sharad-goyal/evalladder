@@ -1,7 +1,7 @@
 import type { ModelProduct, ModelProvider, ModelProviderPlugin } from './types.js';
-import { InfraError } from './errors.js';
+import { ConfigError } from './errors.js';
 
-/** Maps ModelProduct.provider -> plugin. Used for BOTH models under test and judge models. */
+/** Maps ModelProduct.provider -> plugin. resolve() is synchronous and throws ConfigError for an unknown provider. */
 export class ProviderRegistry {
   private plugins = new Map<string, ModelProviderPlugin>();
   private cache = new Map<string, ModelProvider>();
@@ -11,10 +11,12 @@ export class ProviderRegistry {
     return this;
   }
 
+  /** @internal */
   has(key: string): boolean {
     return this.plugins.has(key);
   }
 
+  /** @internal */
   keys(): string[] {
     return [...this.plugins.keys()];
   }
@@ -24,9 +26,8 @@ export class ProviderRegistry {
     if (hit) return hit;
     const plugin = this.plugins.get(product.provider);
     if (!plugin) {
-      throw new InfraError(
+      throw new ConfigError(
         `No plugin registered for provider "${product.provider}" (product "${product.id}"). Registered: ${this.keys().join(', ') || 'none'}`,
-        { retryable: false },
       );
     }
     const provider = plugin.create(product);

@@ -22,3 +22,5 @@ jobs:
       - run: npm test
       - name: CLI smoke test (mock providers, no keys)
         run: node dist/core/cli.js run --config examples/support-triage/mock.config.mjs --out report.json
+      - name: CLI compare smoke test (mock providers, no keys)
+        run: node dist/core/cli.js compare --config examples/support-triage/mock.config.mjs --prompt 'A customer says "I was charged twice". Reply with JSON only {"category":"...","reply":"..."}'

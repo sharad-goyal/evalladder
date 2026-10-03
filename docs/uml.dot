@@ -1,0 +1,181 @@
+digraph G {
+  graph [rankdir=TB, fontname="DejaVu Sans", nodesep=0.35, ranksep=0.45, bgcolor="white", label=<<B>evalladder v0.1.1 - class diagram</B><BR/><FONT POINT-SIZE="11">Each step: one DTO in, one Promise&lt;DTO&gt; out.  resolve = the step ran (a failed check is pass:false)   reject = the step could not run (typed error)</FONT><BR/><FONT POINT-SIZE="10" COLOR="#555555">blue = DTO   green = interface / class you call   orange = optional plugin   grey = errors</FONT>>, labelloc=t, fontsize=18];
+  node [shape=plaintext, fontname="DejaVu Sans", fontsize=10];
+  edge [fontname="DejaVu Sans", fontsize=9, color="#444444"];
+
+  suite [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EAF2FB" COLOR="#2B6CB0">
+    <TR><TD BGCOLOR="#2B6CB0"><FONT COLOR="white"><B>«DTO» EvalSuite</B>  (input to run)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">suiteId: string</TD></TR>
+    <TR><TD ALIGN="LEFT">prompt: PromptTemplate</TD></TR>
+    <TR><TD ALIGN="LEFT">targets: ModelProduct[]   (models under test)</TD></TR>
+    <TR><TD ALIGN="LEFT">cases: TestCase[]</TD></TR>
+    <TR><TD ALIGN="LEFT">passThreshold: number</TD></TR>
+    <TR><TD ALIGN="LEFT">settings?: ModelSettings   concurrency?, retries?</TD></TR></TABLE>>];
+
+  product [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EAF2FB" COLOR="#2B6CB0">
+    <TR><TD BGCOLOR="#2B6CB0"><FONT COLOR="white"><B>«DTO» ModelProduct</B>  (products row)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">id: string</TD></TR>
+    <TR><TD ALIGN="LEFT">provider: 'bedrock' | 'openai' | 'anthropic' | ...</TD></TR>
+    <TR><TD ALIGN="LEFT">modelId: string</TD></TR>
+    <TR><TD ALIGN="LEFT">tier?: 'cheap' | 'mid' | 'reasoning'</TD></TR>
+    <TR><TD ALIGN="LEFT">priceInPer1M?, priceOutPer1M?: number</TD></TR>
+    <TR><TD ALIGN="LEFT">options?: Record (region...; no secrets)</TD></TR></TABLE>>];
+
+  template [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EAF2FB" COLOR="#2B6CB0">
+    <TR><TD BGCOLOR="#2B6CB0"><FONT COLOR="white"><B>«DTO» PromptTemplate</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">id: string</TD></TR>
+    <TR><TD ALIGN="LEFT">template: string  {{vars}}</TD></TR>
+    <TR><TD ALIGN="LEFT">system?: string</TD></TR></TABLE>>];
+
+  testcase [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EAF2FB" COLOR="#2B6CB0">
+    <TR><TD BGCOLOR="#2B6CB0"><FONT COLOR="white"><B>«DTO» TestCase</B>  (test input)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">id: string</TD></TR>
+    <TR><TD ALIGN="LEFT">vars: Record&lt;string, string&gt;</TD></TR>
+    <TR><TD ALIGN="LEFT">assertions: Assertion[]</TD></TR></TABLE>>];
+
+  assertion [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EAF2FB" COLOR="#2B6CB0">
+    <TR><TD BGCOLOR="#2B6CB0"><FONT COLOR="white"><B>«DTO» Assertion</B>  (the check)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">built-in ($0, default): equals | contains | not-contains</TD></TR>
+    <TR><TD ALIGN="LEFT">   | regex | is-json | custom(fn)</TD></TR>
+    <TR><TD ALIGN="LEFT">plugin: { type: string, ... }  e.g. llm-rubric</TD></TR></TABLE>>];
+
+  runner [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EEF8F0" COLOR="#2F855A">
+    <TR><TD BGCOLOR="#2F855A"><FONT COLOR="white"><B>«interface» EvalRunner</B>   impl: DefaultEvalRunner</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><B>run(suite: EvalSuite): Promise&lt;RunReport&gt;</B></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT COLOR="#2F855A">resolves: always for a valid suite; failures recorded per case</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT COLOR="#C53030">rejects: ConfigError (before any model call)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">for each target x case: Promise.allSettled</TD></TR></TABLE>>];
+
+  registry [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EEF8F0" COLOR="#2F855A">
+    <TR><TD BGCOLOR="#2F855A"><FONT COLOR="white"><B>ProviderRegistry</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">use(...plugins: ModelProviderPlugin[]): this</TD></TR>
+    <TR><TD ALIGN="LEFT">resolve(p: ModelProduct): ModelProvider   (sync)</TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT COLOR="#C53030">throws: ConfigError (unknown provider)</FONT></TD></TR></TABLE>>];
+
+  provider [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EEF8F0" COLOR="#2F855A">
+    <TR><TD BGCOLOR="#2F855A"><FONT COLOR="white"><B>«interface» ModelProvider</B>   base: AbsModelProvider</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><B>complete(input: ModelInput): Promise&lt;ModelOutput&gt;</B></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT COLOR="#2F855A">resolves: the model answered (right or wrong)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT COLOR="#C53030">rejects: InfraError (throttle, timeout, 5xx, auth)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">vendor writes only: doComplete(input): Promise&lt;RawCompletion&gt;</TD></TR></TABLE>>];
+
+  adapters [label=<<TABLE BORDER="1" CELLBORDER="1" CELLSPACING="4" CELLPADDING="3" COLOR="#2F855A" STYLE="dashed">
+    <TR><TD COLSPAN="5" BORDER="0"><FONT COLOR="#2F855A"><B>ModelProviderPlugin: create(p: ModelProduct): ModelProvider</B>  (one per vendor, via promptfoo)</FONT></TD></TR>
+    <TR><TD BGCOLOR="#F4FBF6">bedrock()<BR/>OIDC role</TD><TD BGCOLOR="#F4FBF6">openai()<BR/>API key</TD><TD BGCOLOR="#F4FBF6">anthropic()<BR/>API key</TD><TD BGCOLOR="#F4FBF6">gemini()<BR/>API key</TD><TD BGCOLOR="#F4FBF6">ollama()<BR/>local</TD></TR></TABLE>>];
+
+  minput [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EAF2FB" COLOR="#2B6CB0">
+    <TR><TD BGCOLOR="#2B6CB0"><FONT COLOR="white"><B>«DTO» ModelInput</B>  (in)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">prompt: string   (rendered)</TD></TR>
+    <TR><TD ALIGN="LEFT">system?: string</TD></TR>
+    <TR><TD ALIGN="LEFT">maxTokens?, temperature?: number</TD></TR></TABLE>>];
+
+  moutput [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EAF2FB" COLOR="#2B6CB0">
+    <TR><TD BGCOLOR="#2B6CB0"><FONT COLOR="white"><B>«DTO» ModelOutput</B>  (out)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">productId, modelId: string</TD></TR>
+    <TR><TD ALIGN="LEFT">text: string</TD></TR>
+    <TR><TD ALIGN="LEFT">inputTokens, outputTokens: number</TD></TR>
+    <TR><TD ALIGN="LEFT">costUsd: number   (tokens x ModelProduct price)</TD></TR>
+    <TR><TD ALIGN="LEFT">latencyMs: number</TD></TR></TABLE>>];
+
+  check [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EEF8F0" COLOR="#2F855A">
+    <TR><TD BGCOLOR="#2F855A"><FONT COLOR="white"><B>Built-in assertions</B>  (default, $0, no model)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><B>checkBuiltin(a, output: ModelOutput, tc): Promise&lt;AssertionResult&gt;</B></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT COLOR="#2F855A">resolves: always (pass true/false)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">run first; plugin checks run only if all built-ins pass</TD></TR></TABLE>>];
+
+  aplugin [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#FFF7EC" COLOR="#C05621" STYLE="dashed">
+    <TR><TD BGCOLOR="#C05621"><FONT COLOR="white"><B>«interface» AssertionPlugin</B>  (optional, opt-in)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">type: string</TD></TR>
+    <TR><TD ALIGN="LEFT"><B>check(a, output: ModelOutput, tc): Promise&lt;AssertionResult&gt;</B></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT COLOR="#2F855A">resolves: pass true/false</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT COLOR="#C53030">rejects: InfraError (check could not run)</FONT></TD></TR></TABLE>>];
+
+  judge [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#FFF7EC" COLOR="#C05621" STYLE="dashed">
+    <TR><TD BGCOLOR="#C05621"><FONT COLOR="white"><B>evalladder/judge</B>  judge(opts): AssertionPlugin</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">handles { type: 'llm-rubric', rubric }</TD></TR>
+    <TR><TD ALIGN="LEFT">JudgeRouter.judge(input: JudgeInput): Promise&lt;AssertionResult&gt;</TD></TR>
+    <TR><TD ALIGN="LEFT">ladder: ModelProduct[]  cheap first, maxHops 2</TD></TR>
+    <TR><TD ALIGN="LEFT">escalate on: InfraError | unparseable | near threshold</TD></TR>
+    <TR><TD ALIGN="LEFT">never judges a model with itself</TD></TR></TABLE>>];
+
+  aresult [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EAF2FB" COLOR="#2B6CB0">
+    <TR><TD BGCOLOR="#2B6CB0"><FONT COLOR="white"><B>«DTO» AssertionResult</B>  (out)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">type: string</TD></TR>
+    <TR><TD ALIGN="LEFT">pass: boolean   score: number (0..1)</TD></TR>
+    <TR><TD ALIGN="LEFT">reason: string</TD></TR>
+    <TR><TD ALIGN="LEFT">costUsd: number   (0 for built-ins)</TD></TR>
+    <TR><TD ALIGN="LEFT">checkedBy?: string   (judge model)</TD></TR></TABLE>>];
+
+  cresult [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EAF2FB" COLOR="#2B6CB0">
+    <TR><TD BGCOLOR="#2B6CB0"><FONT COLOR="white"><B>«DTO» CaseResult</B>  (one case x one model)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">caseId, productId: string</TD></TR>
+    <TR><TD ALIGN="LEFT">pass: boolean   (answered AND all assertions pass)</TD></TR>
+    <TR><TD ALIGN="LEFT">output?: ModelOutput</TD></TR>
+    <TR><TD ALIGN="LEFT">assertions: AssertionResult[]</TD></TR>
+    <TR><TD ALIGN="LEFT">error?: string   (could not run)</TD></TR></TABLE>>];
+
+  report [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EAF2FB" COLOR="#2B6CB0">
+    <TR><TD BGCOLOR="#2B6CB0"><FONT COLOR="white"><B>«DTO» RunReport</B>  (output of run)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">suiteId, promptId, startedAt, finishedAt</TD></TR>
+    <TR><TD ALIGN="LEFT">models: ModelSummary[]</TD></TR>
+    <TR><TD ALIGN="LEFT">   productId, cases, passed, failed, errored, passRate,</TD></TR>
+    <TR><TD ALIGN="LEFT">   modelCostUsd, assertionCostUsd, totalCostUsd, avgLatencyMs</TD></TR>
+    <TR><TD ALIGN="LEFT">cases: CaseResult[]</TD></TR>
+    <TR><TD ALIGN="LEFT">totalCostUsd: number</TD></TR></TABLE>>];
+
+  gate [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#FDECEC" COLOR="#C53030">
+    <TR><TD BGCOLOR="#C53030"><FONT COLOR="white"><B>releaseGate(report: RunReport, opts): GateDecision</B>  (sync)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">per model: passRate &gt;= threshold AND &gt;= baseline - tolerance</TD></TR>
+    <TR><TD ALIGN="LEFT">GateDecision { pass, models: { productId, passRate, pass, reason }[] }</TD></TR>
+    <TR><TD ALIGN="LEFT">CI: pass -&gt; exit 0 (merge)   fail -&gt; exit 1 (PR check fails)</TD></TR></TABLE>>];
+
+  errors [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#F3F3F3" COLOR="#777777">
+    <TR><TD BGCOLOR="#777777"><FONT COLOR="white"><B>Errors (the only rejects)</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">InfraError extends Error { retryable: boolean }</TD></TR>
+    <TR><TD ALIGN="LEFT">   from complete() / check(); runner retries if retryable</TD></TR>
+    <TR><TD ALIGN="LEFT">ConfigError extends Error</TD></TR>
+    <TR><TD ALIGN="LEFT">   from run() / resolve(); fix the setup</TD></TR></TABLE>>];
+
+
+  compare [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EEF8F0" COLOR="#2F855A">
+    <TR><TD BGCOLOR="#2F855A"><FONT COLOR="white"><B>compare()</B>  one prompt, all models (shortcut over run)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><B>compare(prompt: string, models: ModelProduct[], opts: CompareOptions): Promise&lt;CompareReport&gt;</B></TD></TR>
+    <TR><TD ALIGN="LEFT">opts: plugins, assertions?, judge?, rubric?</TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT COLOR="#2F855A">resolves: every model tried; wrong or failed = ranked row, pass:false</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT COLOR="#C53030">rejects: ConfigError (no prompt, no models, nothing to check)</FONT></TD></TR></TABLE>>];
+
+  creport [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="#EAF2FB" COLOR="#2B6CB0">
+    <TR><TD BGCOLOR="#2B6CB0"><FONT COLOR="white"><B>«DTO» CompareReport</B>  (output of compare)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">extends RunReport</TD></TR>
+    <TR><TD ALIGN="LEFT">ranking: RankedOutput[]   best first</TD></TR>
+    <TR><TD ALIGN="LEFT">   rank, modelId, pass, score, costUsd, latencyMs, text, reason</TD></TR>
+    <TR><TD ALIGN="LEFT">order: pass, score, lower cost, lower latency; errors last</TD></TR></TABLE>>];
+
+  suite -> runner [label=" 0 run(suite)"];
+  product -> suite [label=" targets", style=dashed, arrowhead=odiamond];
+  template -> suite [label=" prompt", style=dashed, arrowhead=odiamond];
+  testcase -> suite [label=" cases", style=dashed, arrowhead=odiamond];
+  assertion -> testcase [style=dashed, arrowhead=odiamond];
+  runner -> minput [label=" 1 render(template, vars)"];
+  runner -> registry [label=" 2 resolve(target)"];
+  registry -> provider;
+  adapters -> provider [style=dashed, arrowhead=empty, label=" implements"];
+  minput -> provider [label=" 3 complete()"];
+  provider -> moutput [label=" Promise<ModelOutput>"];
+  moutput -> check [label=" 4 assertions"];
+  moutput -> aplugin [style=dashed];
+  judge -> aplugin [style=dashed, arrowhead=empty, label=" implements"];
+  judge -> registry [style=dashed, color="#C05621", label=" judge models via\n same registry"];
+  check -> aresult;
+  aplugin -> aresult;
+  aresult -> cresult [label=" 5 collect"];
+  cresult -> report [label=" 6 summarize"];
+  report -> gate [label=" 7 gate"];
+  {rank=same; product; template; testcase}
+  {rank=same; registry; minput}
+  {rank=same; check; aplugin; judge}
+  {rank=same; report; errors}
+  compare -> suite [label=" builds 1-case suite", color="#2F855A"];
+  report -> creport [label=" + ranking", style=dashed, arrowhead=empty];
+  {rank=same; gate; creport}
+}

@@ -1,4 +1,4 @@
-import { AbsModelProvider, InfraError, type ModelProduct, type ModelProviderPlugin, type PromptRequest, type RawCompletion } from '../core/index.js';
+import { AbsModelProvider, InfraError, type ModelProduct, type ModelProviderPlugin, type ModelInput, type RawCompletion } from '../core/index.js';
 
 /** Minimal slice of a promptfoo ApiProvider we rely on. */
 export interface PromptfooApiProvider {
@@ -19,11 +19,11 @@ export const defaultLoader: PromptfooLoader = async (id, opts) => {
 };
 
 /** Build the promptfoo prompt. With a system prompt we send a chat array, which promptfoo chat providers accept. */
-export function toPromptfooPrompt(req: PromptRequest): string {
-  if (!req.system) return req.prompt;
+export function toPromptfooPrompt(input: ModelInput): string {
+  if (!input.system) return input.prompt;
   return JSON.stringify([
-    { role: 'system', content: req.system },
-    { role: 'user', content: req.prompt },
+    { role: 'system', content: input.system },
+    { role: 'user', content: input.prompt },
   ]);
 }
 
@@ -38,10 +38,10 @@ export class PromptfooModelProvider extends AbsModelProvider {
     super(product);
   }
 
-  protected async doComplete(req: PromptRequest): Promise<RawCompletion> {
-    this.apiProvider ??= this.loader(this.providerId, { options: { config: this.config(req) } });
+  protected async doComplete(input: ModelInput): Promise<RawCompletion> {
+    this.apiProvider ??= this.loader(this.providerId, { options: { config: this.config(input) } });
     const api = await this.apiProvider;
-    const res = await api.callApi(toPromptfooPrompt(req));
+    const res = await api.callApi(toPromptfooPrompt(input));
     if (res.error) throw new InfraError(res.error);
     const output = res.output;
     return {
@@ -51,10 +51,10 @@ export class PromptfooModelProvider extends AbsModelProvider {
     };
   }
 
-  private config(req: PromptRequest): Record<string, unknown> {
+  private config(input: ModelInput): Record<string, unknown> {
     const c: Record<string, unknown> = { ...(this.product.options ?? {}) };
-    if (req.temperature !== undefined) c.temperature ??= req.temperature;
-    if (req.maxTokens !== undefined) c.max_tokens ??= req.maxTokens;
+    if (input.temperature !== undefined) c.temperature ??= input.temperature;
+    if (input.maxTokens !== undefined) c.max_tokens ??= input.maxTokens;
     return c;
   }
 }

@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "stripInternal": true,
     "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext",
     "declaration": true, "sourceMap": true, "strict": true, "esModuleInterop": true,
     "skipLibCheck": true, "types": ["node"], "rootDir": "src", "outDir": "dist"

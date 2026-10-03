@@ -1,18 +1,18 @@
-import type { EvalReport, GateDecision } from './types.js';
+import type { RunReport, GateDecision } from './types.js';
 
 export interface GateOptions {
   threshold: number;
   /** Previous report or productId -> passRate. A model must not drop below its baseline. */
-  baseline?: EvalReport | Record<string, number>;
+  baseline?: RunReport | Record<string, number>;
   /** Allowed drop vs baseline (e.g. 0.02). Default 0. */
   tolerance?: number;
 }
 
-/** Per model: pass only if passRate >= threshold AND >= baseline - tolerance. */
-export function releaseGate(report: EvalReport, opts: GateOptions): GateDecision {
+/** Per model: pass only if passRate >= threshold AND >= baseline - tolerance. Synchronous: returns GateDecision, never throws. */
+export function releaseGate(report: RunReport, opts: GateOptions): GateDecision {
   const base = toMap(opts.baseline);
   const tol = opts.tolerance ?? 0;
-  const models = report.byModel.map((m) => {
+  const models = report.models.map((m) => {
     const b = base[m.productId];
     const okThreshold = m.passRate >= opts.threshold;
     const okBaseline = b === undefined || m.passRate >= b - tol;
@@ -31,10 +31,10 @@ export function releaseGate(report: EvalReport, opts: GateOptions): GateDecision
   return { pass: models.length > 0 && models.every((m) => m.pass), models };
 }
 
-function toMap(b?: EvalReport | Record<string, number>): Record<string, number> {
+function toMap(b?: RunReport | Record<string, number>): Record<string, number> {
   if (!b) return {};
-  if ('byModel' in b && Array.isArray((b as EvalReport).byModel)) {
-    return Object.fromEntries((b as EvalReport).byModel.map((m) => [m.productId, m.passRate]));
+  if ('models' in b && Array.isArray((b as RunReport).models)) {
+    return Object.fromEntries((b as RunReport).models.map((m) => [m.productId, m.passRate]));
   }
   return b as Record<string, number>;
 }

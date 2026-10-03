@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { ProviderRegistry, DefaultEvalRunner, releaseGate, InfraError, parseJudge, toMarkdown, type EvalSuite, type ModelProduct } from '../src/core/index.js';
+import { ProviderRegistry, DefaultEvalRunner, releaseGate, InfraError, ConfigError, toMarkdown, type EvalSuite, type ModelProduct } from '../src/core/index.js';
+import { judge, parseVerdict } from '../src/judge/index.js';
 import { mockPlugin } from '../src/testkit/index.js';
 
 const cheapA: ModelProduct = { id: 'a', provider: 'mock', modelId: 'model-a', tier: 'cheap', priceInPer1M: 1, priceOutPer1M: 2 };
@@ -22,23 +23,26 @@ const suite = (over: Partial<EvalSuite> = {}): EvalSuite => ({
 
 describe('runner', () => {
   it('runs every target x case, renders template, reports cost per model', async () => {
-    const plugin = mockPlugin('mock', { a: [(r) => (r.prompt.includes('refund') ? 'billing' : 'bug')], b: ['billing'] });
+    const plugin = mockPlugin('mock', { a: [(i) => (i.prompt.includes('refund') ? 'billing' : 'bug')], b: ['billing'] });
     const report = await new DefaultEvalRunner(new ProviderRegistry().use(plugin), { backoffMs: 1 }).run(suite());
-    expect(report.results).toHaveLength(4);
-    const a = report.byModel.find((m) => m.productId === 'a')!;
-    const b = report.byModel.find((m) => m.productId === 'b')!;
+    expect(report.cases).toHaveLength(4);
+    const a = report.models.find((m) => m.productId === 'a')!;
+    const b = report.models.find((m) => m.productId === 'b')!;
     expect(a.passRate).toBe(1);
     expect(b.passRate).toBe(0.5);
+    expect(a.cases).toBe(2);
     // 2 calls x (10 in * $1 + 5 out * $2) / 1M
     expect(a.modelCostUsd).toBeCloseTo(0.00004, 10);
+    expect(a.assertionCostUsd).toBe(0);
     expect(plugin.providers.get('a')!.calls[0].prompt).toBe('Classify: refund please');
     expect(toMarkdown(report)).toContain('model-a');
   });
 
-  it('a failing case resolves pass:false; it does not reject or kill the suite', async () => {
+  it('a failing check resolves pass:false; it does not reject or kill the suite', async () => {
     const plugin = mockPlugin('mock', { a: ['nope'], b: ['billing'] });
     const report = await new DefaultEvalRunner(new ProviderRegistry().use(plugin), { backoffMs: 1 }).run(suite());
-    expect(report.results.filter((r) => r.productId === 'a').every((r) => !r.grade.pass && !r.error)).toBe(true);
+    const aCases = report.cases.filter((r) => r.productId === 'a');
+    expect(aCases.every((r) => !r.pass && !r.error && r.assertions[0].pass === false)).toBe(true);
   });
 
   it('retries infra errors, then records error without killing other targets', async () => {
@@ -49,34 +53,39 @@ describe('runner', () => {
     const report = await new DefaultEvalRunner(new ProviderRegistry().use(plugin), { backoffMs: 1 }).run(
       suite({ cases: [suite().cases[0]], retries: 1, concurrency: 1 }),
     );
-    const a = report.results.find((r) => r.productId === 'a')!;
-    const b = report.results.find((r) => r.productId === 'b')!;
-    expect(a.grade.pass).toBe(true);
+    const a = report.cases.find((r) => r.productId === 'a')!;
+    const b = report.cases.find((r) => r.productId === 'b')!;
+    expect(a.pass).toBe(true);
     expect(b.error).toContain('timeout');
-    expect(report.byModel.find((m) => m.productId === 'b')!.errored).toBe(1);
+    expect(b.output).toBeUndefined();
+    expect(report.models.find((m) => m.productId === 'b')!.errored).toBe(1);
     expect(plugin.providers.get('b')!.calls).toHaveLength(2); // 1 try + 1 retry
   });
 
-  it('does not retry non-retryable errors (auth/config)', async () => {
+  it('does not retry non-retryable errors (auth)', async () => {
     const plugin = mockPlugin('mock', { a: [new Error('API key is not set')] });
     const report = await new DefaultEvalRunner(new ProviderRegistry().use(plugin), { backoffMs: 1 }).run(
       suite({ targets: [cheapA], cases: [suite().cases[0]], retries: 3 }),
     );
-    expect(report.results[0].error).toContain('API key');
+    expect(report.cases[0].error).toContain('API key');
     expect(plugin.providers.get('a')!.calls).toHaveLength(1);
   });
 
-  it('unknown provider is an infra error on that target only', async () => {
-    const report = await new DefaultEvalRunner(new ProviderRegistry().use(mockPlugin('mock', { a: ['billing'] }))).run(
-      suite({ targets: [cheapA, { ...cheapB, provider: 'nope' }], cases: [suite().cases[0]] }),
-    );
-    expect(report.results.find((r) => r.productId === 'b')!.error).toMatch(/No plugin registered/);
-    expect(report.results.find((r) => r.productId === 'a')!.grade.pass).toBe(true);
+  it('run() rejects with ConfigError for an unknown provider, before any model call', async () => {
+    const plugin = mockPlugin('mock', { a: ['billing'] });
+    const run = new DefaultEvalRunner(new ProviderRegistry().use(plugin)).run(suite({ targets: [cheapA, { ...cheapB, provider: 'nope' }] }));
+    await expect(run).rejects.toBeInstanceOf(ConfigError);
+    expect(plugin.providers.size).toBe(0);
+  });
+
+  it('run() rejects with ConfigError when an assertion type has no plugin (judge is off by default)', async () => {
+    const s = suite({ cases: [{ id: 'r', vars: { text: 'x' }, assertions: [{ type: 'llm-rubric', rubric: 'polite?' }] }] });
+    await expect(new DefaultEvalRunner(new ProviderRegistry().use(mockPlugin('mock'))).run(s)).rejects.toThrow(/no plugin handles it/);
   });
 });
 
-describe('deterministic assertions', () => {
-  it('equals, regex, is-json, not-contains, javascript', async () => {
+describe('built-in assertions', () => {
+  it('equals, regex, is-json, not-contains, custom', async () => {
     const plugin = mockPlugin('mock', { a: ['```json\n{"label":"billing"}\n```'] });
     const report = await new DefaultEvalRunner(new ProviderRegistry().use(plugin)).run(
       suite({
@@ -89,84 +98,94 @@ describe('deterministic assertions', () => {
               { type: 'is-json' },
               { type: 'regex', value: '"label":\\s*"billing"' },
               { type: 'not-contains', value: 'bug' },
-              { type: 'javascript', fn: (o) => JSON.parse(o.replace(/```(json)?/g, '')).label === 'billing' },
+              { type: 'custom', name: 'label is billing', fn: (o) => JSON.parse(o.text.replace(/```(json)?/g, '')).label === 'billing' },
             ],
           },
           { id: 'eq', vars: { text: 'x' }, assertions: [{ type: 'equals', value: 'billing' }] },
+          { id: 'throws', vars: { text: 'x' }, assertions: [{ type: 'custom', fn: () => { throw new Error('boom'); } }] },
         ],
       }),
     );
-    expect(report.results.find((r) => r.caseId === 'c')!.grade.pass).toBe(true);
-    expect(report.results.find((r) => r.caseId === 'eq')!.grade.pass).toBe(false);
+    const c = report.cases.find((r) => r.caseId === 'c')!;
+    expect(c.pass).toBe(true);
+    expect(c.assertions.map((a) => a.type)).toEqual(['is-json', 'regex', 'not-contains', 'custom']);
+    expect(c.assertions.every((a) => a.costUsd === 0)).toBe(true);
+    expect(report.cases.find((r) => r.caseId === 'eq')!.pass).toBe(false);
+    const t = report.cases.find((r) => r.caseId === 'throws')!;
+    expect(t.pass).toBe(false);
+    expect(t.assertions[0].reason).toMatch(/boom/);
   });
 });
 
-describe('JudgeRouter', () => {
-  const rubricSuite = (targets = [cheapA]) =>
-    suite({
+describe('judge plugin (optional)', () => {
+  const run = async (replies: Parameters<typeof mockPlugin>[1], targets = [cheapA], extra: object[] = []) => {
+    const plugin = mockPlugin('mock', replies);
+    const registry = new ProviderRegistry().use(plugin);
+    const s = suite({
       targets,
-      cases: [{ id: 'r', vars: { text: 'x' }, assertions: [{ type: 'llm-rubric', rubric: 'Is it polite?' }] }],
-      graderPolicy: { tiers: [judge1, judge2, judge3], threshold: 0.7, nearThresholdBand: 0.1, maxHops: 2 },
+      cases: [{ id: 'r', vars: { text: 'x' }, assertions: [...(extra as any), { type: 'llm-rubric', rubric: 'Is it polite?' }] }],
     });
+    const runner = new DefaultEvalRunner(registry, {
+      assertionPlugins: [judge({ registry, ladder: [judge1, judge2, judge3], threshold: 0.7, nearThresholdBand: 0.1, maxHops: 2 })],
+    });
+    return { report: await runner.run(s), plugin };
+  };
 
-  it('cheap judge decides when confident (0 hops)', async () => {
-    const plugin = mockPlugin('mock', { a: ['hello'], j1: ['{"score":0.95,"reason":"polite"}'] });
-    const r = (await new DefaultEvalRunner(new ProviderRegistry().use(plugin)).run(rubricSuite())).results[0];
-    expect(r.grade).toMatchObject({ pass: true, graderModelId: 'judge-cheap', hops: 0 });
+  it('cheap judge decides when confident', async () => {
+    const { report, plugin } = await run({ a: ['hello'], j1: ['{"score":0.95,"reason":"polite"}'] });
+    expect(report.cases[0].assertions[0]).toMatchObject({ type: 'llm-rubric', pass: true, checkedBy: 'judge-cheap' });
     expect(plugin.providers.has('j2')).toBe(false);
   });
 
-  it('escalates on unparseable, infra error and near-threshold; stops at maxHops', async () => {
-    const plugin = mockPlugin('mock', {
+  it('escalates on unparseable and near-threshold; stops at maxHops; cost lands in assertionCostUsd', async () => {
+    const { report } = await run({
       a: ['hello'],
       j1: ['I think it is fine'],
       j2: ['{"score":0.72,"reason":"borderline"}'],
       j3: ['{"score":0.2,"reason":"rude"}'],
     });
-    const r = (await new DefaultEvalRunner(new ProviderRegistry().use(plugin)).run(rubricSuite())).results[0];
-    expect(r.grade).toMatchObject({ pass: false, graderModelId: 'judge-top', hops: 2 });
-    expect(r.grade.graderCostUsd).toBeGreaterThan(0);
+    expect(report.cases[0].assertions[0]).toMatchObject({ pass: false, checkedBy: 'judge-top' });
+    expect(report.models[0].assertionCostUsd).toBeGreaterThan(0);
   });
 
   it('infra error on a judge escalates instead of rejecting', async () => {
-    const plugin = mockPlugin('mock', { a: ['hello'], j1: [new InfraError('throttled')], j2: ['{"score":0.9,"reason":"ok"}'] });
-    const r = (await new DefaultEvalRunner(new ProviderRegistry().use(plugin)).run(rubricSuite())).results[0];
-    expect(r.grade).toMatchObject({ pass: true, graderModelId: 'judge-mid', hops: 1 });
+    const { report } = await run({ a: ['hello'], j1: [new InfraError('throttled')], j2: ['{"score":0.9,"reason":"ok"}'] });
+    expect(report.cases[0].assertions[0]).toMatchObject({ pass: true, checkedBy: 'judge-mid' });
   });
 
-  it('all judges fail -> resolves ungraded pass:false', async () => {
-    const plugin = mockPlugin('mock', { a: ['hello'], j1: ['?'], j2: ['?'], j3: ['?'] });
-    const r = (await new DefaultEvalRunner(new ProviderRegistry().use(plugin)).run(rubricSuite())).results[0];
-    expect(r.grade.pass).toBe(false);
-    expect(r.grade.reason).toMatch(/ungraded/);
+  it('every judge answer unusable -> resolves pass:false "ungraded"', async () => {
+    const { report } = await run({ a: ['hello'], j1: ['?'], j2: ['?'], j3: ['?'] });
+    expect(report.cases[0].pass).toBe(false);
+    expect(report.cases[0].assertions[0].reason).toMatch(/ungraded/);
+  });
+
+  it('no judge reachable -> InfraError, recorded as case error', async () => {
+    const { report } = await run({ a: ['hello'], j1: [new InfraError('down', { retryable: false })], j2: [new InfraError('down')], j3: [new InfraError('down')] });
+    expect(report.cases[0].error).toMatch(/no judge reachable/);
   });
 
   it('never lets a model judge itself', async () => {
-    const plugin = mockPlugin('mock', { j1: ['hello'], j2: ['{"score":0.9,"reason":"ok"}'] });
-    const r = (await new DefaultEvalRunner(new ProviderRegistry().use(plugin)).run(rubricSuite([judge1]))).results[0];
-    expect(r.grade.graderModelId).toBe('judge-mid');
+    const { report } = await run({ j1: ['hello'], j2: ['{"score":0.9,"reason":"ok"}'] }, [judge1]);
+    expect(report.cases[0].assertions[0].checkedBy).toBe('judge-mid');
   });
 
-  it('skips the judge when a code assertion already failed', async () => {
-    const plugin = mockPlugin('mock', { a: ['nope'], j1: ['{"score":1,"reason":"x"}'] });
-    const s = rubricSuite();
-    s.cases[0].assertions.unshift({ type: 'contains', value: 'hello' });
-    const r = (await new DefaultEvalRunner(new ProviderRegistry().use(plugin)).run(s)).results[0];
-    expect(r.grade.pass).toBe(false);
+  it('skips the judge when a built-in assertion already failed', async () => {
+    const { report, plugin } = await run({ a: ['nope'], j1: ['{"score":1,"reason":"x"}'] }, [cheapA], [{ type: 'contains', value: 'hello' }]);
+    expect(report.cases[0].pass).toBe(false);
     expect(plugin.providers.has('j1')).toBe(false);
   });
 
-  it('parseJudge rejects out-of-range and junk', () => {
-    expect(parseJudge('{"score": 1.4}')).toBeNull();
-    expect(parseJudge('nothing')).toBeNull();
-    expect(parseJudge('Sure: {"score": 0.5, "reason": "meh"}')).toEqual({ score: 0.5, reason: 'meh' });
+  it('parseVerdict rejects out-of-range and junk', () => {
+    expect(parseVerdict('{"score": 1.4}')).toBeNull();
+    expect(parseVerdict('nothing')).toBeNull();
+    expect(parseVerdict('Sure: {"score": 0.5, "reason": "meh"}')).toEqual({ score: 0.5, reason: 'meh' });
   });
 });
 
-describe('ReleaseGate', () => {
+describe('releaseGate', () => {
   const report = (a: number, b: number) =>
     ({
-      byModel: [
+      models: [
         { productId: 'a', passRate: a },
         { productId: 'b', passRate: b },
       ],
